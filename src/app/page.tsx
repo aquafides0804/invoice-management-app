@@ -45,7 +45,7 @@ export default function InvoiceManagementPage() {
   // フィルター用ステート
   const [selectedMonth, setSelectedMonth] = useState('2026-08');
   const [selectedClient, setSelectedClient] = useState('ALL');
-  const [selectedStatus, setSelectedStatus] = useState('ALL'); // ステータス絞り込み
+  const [selectedStatus, setSelectedStatus] = useState('ALL');
   
   const [customClientName, setCustomClientName] = useState('');
   const [honorific, setHonorific] = useState('御中');
@@ -71,7 +71,10 @@ export default function InvoiceManagementPage() {
     setLoading(false);
   };
 
-  const clients = Array.from(new Set(movies.map((m) => m.client_name).filter(Boolean)));
+  // 案件データおよび請求書履歴の双方から過去のクライアント名を抽出して重複排除
+  const rawClientsFromMovies = movies.map((m) => m.client_name).filter(Boolean);
+  const rawClientsFromInvoices = invoices.map((inv) => inv.client_name.replace(/( 御中| 様)$/, '').trim()).filter(Boolean);
+  const clients = Array.from(new Set([...rawClientsFromMovies, ...rawClientsFromInvoices]));
 
   // 絞り込み条件（年月、クライアント、ステータス）
   const filteredMovies = movies.filter((movie) => {
@@ -161,7 +164,6 @@ export default function InvoiceManagementPage() {
     ]).select();
 
     if (!error && data) {
-      // 選択した案件のステータスを自動で「納品完了」に更新
       const nowIso = new Date().toISOString();
       await supabase
         .from('movies')
@@ -236,7 +238,7 @@ export default function InvoiceManagementPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">クライアント</label>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">クライアント選択</label>
                   <select
                     value={selectedClient}
                     onChange={(e) => handleClientSelectChange(e.target.value)}
@@ -272,7 +274,7 @@ export default function InvoiceManagementPage() {
 
                 <div className="border-l border-slate-200 pl-4 flex flex-wrap gap-2">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">請求書宛名</label>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">請求書宛名 (直接入力/変更)</label>
                     <input
                       type="text"
                       placeholder="例: 株式会社TIAMI"
@@ -281,7 +283,7 @@ export default function InvoiceManagementPage() {
                         setCustomClientName(e.target.value);
                         setReadyToDownload(false);
                       }}
-                      className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 w-48 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
                   <div>
