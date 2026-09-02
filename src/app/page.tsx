@@ -18,6 +18,7 @@ type Movie = {
   client_name: string;
   unit_price: number;
   delivered_date: string | null;
+  updated_at?: string;
   created_at: string;
 };
 
@@ -40,8 +41,11 @@ export default function InvoiceManagementPage() {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // フィルター用ステート
   const [selectedMonth, setSelectedMonth] = useState('2026-08');
   const [selectedClient, setSelectedClient] = useState('ALL');
+  const [selectedStatus, setSelectedStatus] = useState('ALL'); // ステータス絞り込み
   
   const [customClientName, setCustomClientName] = useState('');
   const [honorific, setHonorific] = useState('御中');
@@ -69,11 +73,13 @@ export default function InvoiceManagementPage() {
 
   const clients = Array.from(new Set(movies.map((m) => m.client_name).filter(Boolean)));
 
+  // 絞り込み条件（年月、クライアント、ステータス）
   const filteredMovies = movies.filter((movie) => {
-    const dateStr = movie.delivered_date || movie.created_at;
+    const dateStr = movie.updated_at || movie.delivered_date || movie.created_at;
     const matchesMonth = selectedMonth ? dateStr?.startsWith(selectedMonth) : true;
     const matchesClient = selectedClient === 'ALL' || movie.client_name === selectedClient;
-    return matchesMonth && matchesClient;
+    const matchesStatus = selectedStatus === 'ALL' || movie.status === selectedStatus;
+    return matchesMonth && matchesClient && matchesStatus;
   });
 
   const handleClientSelectChange = (client: string) => {
@@ -93,18 +99,33 @@ export default function InvoiceManagementPage() {
   };
 
   const handleUnitPriceChange = async (id: string, price: number) => {
-    setMovies((prev) => prev.map((m) => (m.id === id ? { ...m, unit_price: price } : m)));
-    await supabase.from('movies').update({ unit_price: price }).eq('id', id);
+    const nowIso = new Date().toISOString();
+    setMovies((prev) => prev.map((m) => (m.id === id ? { ...m, unit_price: price, updated_at: nowIso } : m)));
+    await supabase.from('movies').update({ unit_price: price, updated_at: nowIso }).eq('id', id);
   };
 
   const handleMovieStatusChange = async (id: string, newStatus: string) => {
-    setMovies((prev) => prev.map((m) => (m.id === id ? { ...m, status: newStatus } : m)));
-    await supabase.from('movies').update({ status: newStatus }).eq('id', id);
+    const nowIso = new Date().toISOString();
+    setMovies((prev) => prev.map((m) => (m.id === id ? { ...m, status: newStatus, updated_at: nowIso } : m)));
+    await supabase.from('movies').update({ status: newStatus, updated_at: nowIso }).eq('id', id);
   };
 
   const handleInvoiceStatusChange = async (id: string, newStatus: string) => {
     setInvoices((prev) => prev.map((inv) => (inv.id === id ? { ...inv, status: newStatus } : inv)));
     await supabase.from('invoices').update({ status: newStatus }).eq('id', id);
+  };
+
+  // 請求書削除機能
+  const handleDeleteInvoice = async (id: string, invoiceNumber: string) => {
+    if (!confirm(`請求書No.「${invoiceNumber}」を削除してもよろしいですか？`)) return;
+
+    const { error } = await supabase.from('invoices').delete().eq('id', id);
+
+    if (!error) {
+      setInvoices((prev) => prev.filter((inv) => inv.id !== id));
+    } else {
+      alert(`削除に失敗しました: ${error.message}`);
+    }
   };
 
   const toggleSelect = (id: string) => {
@@ -121,6 +142,7 @@ export default function InvoiceManagementPage() {
 
   const finalClientName = customClientName || (selectedClient !== 'ALL' ? selectedClient : '');
 
+  // DB保存 ＆ 案件ステータス一括更新
   const handleCreateAndRecordInvoice = async () => {
     if (!finalClientName || selectedIds.length === 0 || !dueDateInput) return;
 
@@ -139,6 +161,17 @@ export default function InvoiceManagementPage() {
     ]).select();
 
     if (!error && data) {
+      // 選択した案件のステータスを自動で「納品完了」に更新
+      const nowIso = new Date().toISOString();
+      await supabase
+        .from('movies')
+        .update({ status: '納品完了', updated_at: nowIso })
+        .in('id', selectedIds);
+
+      setMovies((prev) =>
+        prev.map((m) => (selectedIds.includes(m.id) ? { ...m, status: '納品完了', updated_at: nowIso } : m))
+      );
+
       setInvoices((prev) => [data[0], ...prev]);
       setReadyToDownload(true);
     } else {
@@ -191,7 +224,7 @@ export default function InvoiceManagementPage() {
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col lg:flex-row gap-6 items-start lg:items-center justify-between">
               <div className="flex flex-wrap gap-4 w-full lg:w-auto">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">対象年月</label>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">更新年月</label>
                   <input
                     type="month"
                     value={selectedMonth}
@@ -203,16 +236,35 @@ export default function InvoiceManagementPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">絞り込み</label>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">クライアント</label>
                   <select
                     value={selectedClient}
                     onChange={(e) => handleClientSelectChange(e.target.value)}
                     className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
-                    <option value="ALL">すべてのクライアント</option>
+                    <option value="ALL">すべて</option>
                     {clients.map((client) => (
                       <option key={client} value={client}>
                         {client}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">ステータス絞り込み</label>
+                  <select
+                    value={selectedStatus}
+                    onChange={(e) => {
+                      setSelectedStatus(e.target.value);
+                      setSelectedIds([]);
+                      setReadyToDownload(false);
+                    }}
+                    className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="ALL">すべて</option>
+                    {MOVIE_STATUS_OPTIONS.map((st) => (
+                      <option key={st} value={st}>
+                        {st}
                       </option>
                     ))}
                   </select>
@@ -229,7 +281,7 @@ export default function InvoiceManagementPage() {
                         setCustomClientName(e.target.value);
                         setReadyToDownload(false);
                       }}
-                      className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 w-44 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 w-40 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
                   <div>
@@ -337,12 +389,14 @@ export default function InvoiceManagementPage() {
                         <th className="p-3.5">案件名 / タイトル</th>
                         <th className="p-3.5">クライアント</th>
                         <th className="p-3.5 w-36">ステータス</th>
-                        <th className="p-3.5 w-40 text-right">単価 (税抜)</th>
+                        <th className="p-3.5 w-32">最終更新日</th>
+                        <th className="p-3.5 w-36 text-right">単価 (税抜)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
                       {filteredMovies.map((movie) => {
                         const isSelected = selectedIds.includes(movie.id);
+                        const displayDate = (movie.updated_at || movie.delivered_date || movie.created_at)?.substring(0, 10);
                         return (
                           <tr
                             key={movie.id}
@@ -373,6 +427,7 @@ export default function InvoiceManagementPage() {
                                 ))}
                               </select>
                             </td>
+                            <td className="p-3.5 text-slate-400 text-xs font-mono">{displayDate || '-'}</td>
                             <td className="p-3.5 text-right">
                               <div className="flex items-center justify-end gap-1">
                                 <span className="text-slate-400 text-xs">¥</span>
@@ -380,7 +435,7 @@ export default function InvoiceManagementPage() {
                                   type="number"
                                   value={movie.unit_price || 0}
                                   onChange={(e) => handleUnitPriceChange(movie.id, Number(e.target.value))}
-                                  className="bg-white border border-slate-300 rounded-md px-2 py-1 text-sm text-right text-emerald-700 font-mono w-28 focus:outline-none focus:border-emerald-500"
+                                  className="bg-white border border-slate-300 rounded-md px-2 py-1 text-sm text-right text-emerald-700 font-mono w-24 focus:outline-none focus:border-emerald-500"
                                 />
                               </div>
                             </td>
@@ -414,12 +469,13 @@ export default function InvoiceManagementPage() {
                     <th className="p-3.5">支払期限</th>
                     <th className="p-3.5">ステータス</th>
                     <th className="p-3.5 text-center">再発行</th>
+                    <th className="p-3.5 text-center">操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {invoices.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="p-12 text-center text-slate-400 text-sm">
+                      <td colSpan={8} className="p-12 text-center text-slate-400 text-sm">
                         まだ発行された請求書はありません。
                       </td>
                     </tr>
@@ -482,6 +538,14 @@ export default function InvoiceManagementPage() {
                               }
                             </PDFDownloadLink>
                           )}
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <button
+                            onClick={() => handleDeleteInvoice(inv.id, inv.invoice_number)}
+                            className="bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 font-semibold py-1 px-2.5 rounded-lg text-xs transition-all cursor-pointer"
+                          >
+                            🗑️ 削除
+                          </button>
                         </td>
                       </tr>
                     ))
