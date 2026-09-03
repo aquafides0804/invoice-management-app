@@ -44,7 +44,7 @@ export default function InvoiceManagementPage() {
   
   // フィルター用ステート
   const [selectedMonth, setSelectedMonth] = useState('2026-08');
-  const [selectedClient, setSelectedClient] = useState('ALL');
+  const [selectedClient, setSelectedClient] = useState('ALL'); // 案件絞り込み専用
   const [selectedStatus, setSelectedStatus] = useState('ALL');
   
   const [customClientName, setCustomClientName] = useState('');
@@ -71,12 +71,19 @@ export default function InvoiceManagementPage() {
     setLoading(false);
   };
 
-  // 案件データおよび請求書履歴の双方から過去のクライアント名を抽出して重複排除
-  const rawClientsFromMovies = movies.map((m) => m.client_name).filter(Boolean);
-  const rawClientsFromInvoices = invoices.map((inv) => inv.client_name.replace(/( 御中| 様)$/, '').trim()).filter(Boolean);
-  const clients = Array.from(new Set([...rawClientsFromMovies, ...rawClientsFromInvoices]));
+  // ① 案件テーブルから案件絞り込み用クライアントリストを抽出
+  const movieClients = Array.from(new Set(movies.map((m) => m.client_name).filter(Boolean)));
 
-  // 絞り込み条件（年月、クライアント、ステータス）
+  // ② 請求書履歴テーブルから過去の宛名履歴リストを抽出
+  const invoiceClientHistory = Array.from(
+    new Set(
+      invoices
+        .map((inv) => inv.client_name.replace(/( 御中| 様)$/, '').trim())
+        .filter(Boolean)
+    )
+  );
+
+  // 案件の絞り込み条件（年月、クライアント、ステータス）
   const filteredMovies = movies.filter((movie) => {
     const dateStr = movie.updated_at || movie.delivered_date || movie.created_at;
     const matchesMonth = selectedMonth ? dateStr?.startsWith(selectedMonth) : true;
@@ -88,8 +95,15 @@ export default function InvoiceManagementPage() {
   const handleClientSelectChange = (client: string) => {
     setSelectedClient(client);
     setSelectedIds([]);
-    setCustomClientName(client !== 'ALL' ? client : '');
     setReadyToDownload(false);
+  };
+
+  // 履歴ドロップダウンから選択された時に宛名入力欄へセットする処理
+  const handleSelectHistoryClient = (clientName: string) => {
+    if (clientName) {
+      setCustomClientName(clientName);
+      setReadyToDownload(false);
+    }
   };
 
   const handleSelectAll = () => {
@@ -143,7 +157,7 @@ export default function InvoiceManagementPage() {
   const tax = Math.floor(subtotal * 0.1);
   const total = subtotal + tax;
 
-  const finalClientName = customClientName || (selectedClient !== 'ALL' ? selectedClient : '');
+  const finalClientName = customClientName.trim();
 
   // DB保存 ＆ 案件ステータス一括更新
   const handleCreateAndRecordInvoice = async () => {
@@ -225,65 +239,90 @@ export default function InvoiceManagementPage() {
           <div className="space-y-6">
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col lg:flex-row gap-6 items-start lg:items-center justify-between">
               <div className="flex flex-wrap gap-4 w-full lg:w-auto">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">更新年月</label>
-                  <input
-                    type="month"
-                    value={selectedMonth}
-                    onChange={(e) => {
-                      setSelectedMonth(e.target.value);
-                      setReadyToDownload(false);
-                    }}
-                    className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">クライアント選択</label>
-                  <select
-                    value={selectedClient}
-                    onChange={(e) => handleClientSelectChange(e.target.value)}
-                    className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="ALL">すべて</option>
-                    {clients.map((client) => (
-                      <option key={client} value={client}>
-                        {client}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">ステータス絞り込み</label>
-                  <select
-                    value={selectedStatus}
-                    onChange={(e) => {
-                      setSelectedStatus(e.target.value);
-                      setSelectedIds([]);
-                      setReadyToDownload(false);
-                    }}
-                    className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="ALL">すべて</option>
-                    {MOVIE_STATUS_OPTIONS.map((st) => (
-                      <option key={st} value={st}>
-                        {st}
-                      </option>
-                    ))}
-                  </select>
+                {/* 1. 案件絞り込みセクション */}
+                <div className="flex flex-wrap gap-3 pr-4 border-r border-slate-200">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">更新年月</label>
+                    <input
+                      type="month"
+                      value={selectedMonth}
+                      onChange={(e) => {
+                        setSelectedMonth(e.target.value);
+                        setReadyToDownload(false);
+                      }}
+                      className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">案件絞り込み</label>
+                    <select
+                      value={selectedClient}
+                      onChange={(e) => handleClientSelectChange(e.target.value)}
+                      className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="ALL">すべてのクライアント</option>
+                      {movieClients.map((client) => (
+                        <option key={client} value={client}>
+                          {client}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">ステータス</label>
+                    <select
+                      value={selectedStatus}
+                      onChange={(e) => {
+                        setSelectedStatus(e.target.value);
+                        setSelectedIds([]);
+                        setReadyToDownload(false);
+                      }}
+                      className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="ALL">すべて</option>
+                      {MOVIE_STATUS_OPTIONS.map((st) => (
+                        <option key={st} value={st}>
+                          {st}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
-                <div className="border-l border-slate-200 pl-4 flex flex-wrap gap-2">
+                {/* 2. 請求書宛名・設定セクション */}
+                <div className="flex flex-wrap gap-2 items-end">
+                  {invoiceClientHistory.length > 0 && (
+                    <div>
+                      <label className="block text-xs font-semibold text-emerald-700 mb-1.5">📋 過去の宛名から呼び出す</label>
+                      <select
+                        defaultValue=""
+                        onChange={(e) => {
+                          handleSelectHistoryClient(e.target.value);
+                          e.target.value = ''; // 選択後は初期値に戻す
+                        }}
+                        className="bg-emerald-50/60 border border-emerald-300 text-emerald-900 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                      >
+                        <option value="" disabled>宛名履歴から選択...</option>
+                        {invoiceClientHistory.map((historyName) => (
+                          <option key={historyName} value={historyName}>
+                            {historyName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">請求書宛名 (直接入力/変更)</label>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">請求書宛名 (手入力/変更)</label>
                     <input
                       type="text"
-                      placeholder="例: 株式会社TIAMI"
+                      placeholder="例: 株式会社nekomaru"
                       value={customClientName}
                       onChange={(e) => {
                         setCustomClientName(e.target.value);
                         setReadyToDownload(false);
                       }}
-                      className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 w-48 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 w-44 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
                   <div>
